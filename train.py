@@ -26,12 +26,12 @@ logger = logging.getLogger(__name__)
 best_acc = 0
 
 
-def save_checkpoint(state, is_best, checkpoint, filename='checkpoint.pth.tar'):
+def save_checkpoint(state, is_best, checkpoint, filename='checkpoint.pth.tar', save_name='model_best.pth.tar'):
     filepath = os.path.join(checkpoint, filename)
     torch.save(state, filepath)
     if is_best:
         shutil.copyfile(filepath, os.path.join(checkpoint,
-                                               'model_best.pth.tar'))
+                                               save_name))
 
 
 def set_seed(args):
@@ -321,6 +321,9 @@ def train(args, labeled_trainloader, unlabeled_trainloader, test_loader,
         if not args.no_progress:
             p_bar = tqdm(range(args.eval_step),
                          disable=args.local_rank not in [-1, 0])
+            
+        total_pseudo_labels = []
+
         for batch_idx in range(args.eval_step):
             try:
                 inputs_x, targets_x = labeled_iter.next()
@@ -411,7 +414,9 @@ def train(args, labeled_trainloader, unlabeled_trainloader, test_loader,
                 
             # 가짜 레이블 저장
             pseudo_labels = targets_u.cpu().tolist()
-            save_pseudo_labels(pseudo_labels, pseudo_label_file)
+            total_pseudo_labels.extend(pseudo_labels)
+        
+        # save_pseudo_labels(pseudo_labels, pseudo_label_file)
         
         # # 가짜 레이블 저장
         # pseudo_labels = targets_u.cpu().tolist()
@@ -427,6 +432,7 @@ def train(args, labeled_trainloader, unlabeled_trainloader, test_loader,
 
         if args.local_rank in [-1, 0]:
             test_loss, test_acc = test(args, test_loader, test_model, epoch)
+            # test_mean_acc = np.mean(test_accs[-20:]) # mean top-1 acc
 
             args.writer.add_scalar('train/1.train_loss', losses.avg, epoch)
             args.writer.add_scalar('train/2.train_loss_x', losses_x.avg, epoch)
@@ -435,23 +441,27 @@ def train(args, labeled_trainloader, unlabeled_trainloader, test_loader,
             args.writer.add_scalar('test/1.test_acc', test_acc, epoch)
             args.writer.add_scalar('test/2.test_loss', test_loss, epoch)
 
+            # Best top-1 acc
             is_best = test_acc > best_acc
-            best_acc = max(test_acc, best_acc)
-
+            
             model_to_save = model.module if hasattr(model, "module") else model
             if args.use_ema:
                 ema_to_save = ema_model.ema.module if hasattr(
                     ema_model.ema, "module") else ema_model.ema
-            save_checkpoint({
-                'epoch': epoch + 1,
-                'state_dict': model_to_save.state_dict(),
-                'ema_state_dict': ema_to_save.state_dict() if args.use_ema else None,
-                'acc': test_acc,
-                'best_acc': best_acc,
-                'optimizer': optimizer.state_dict(),
-                'scheduler': scheduler.state_dict(),
-            }, is_best, args.out)
-
+                
+            if is_best:
+                best_acc = max(test_acc, best_acc)
+                save_pseudo_labels(total_pseudo_labels, pseudo_label_file)
+                save_checkpoint({
+                    'epoch': epoch + 1,
+                    'state_dict': model_to_save.state_dict(),
+                    'ema_state_dict': ema_to_save.state_dict() if args.use_ema else None,
+                    'acc': test_acc,
+                    'best_acc': best_acc,
+                    'optimizer': optimizer.state_dict(),
+                    'scheduler': scheduler.state_dict(),
+                }, is_best, args.out)
+            
             test_accs.append(test_acc)
             logger.info('Best top-1 acc: {:.2f}'.format(best_acc))
             logger.info('Mean top-1 acc: {:.2f}\n'.format(
