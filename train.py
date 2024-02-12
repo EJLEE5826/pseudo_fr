@@ -287,9 +287,9 @@ def main():
           model, optimizer, ema_model, scheduler)
 
 def save_pseudo_labels(pseudo_labels, file_path):
-    with open(file_path, 'a') as file:
-        for label in pseudo_labels:
-            file.write(f"{label}\n")
+    with open(file_path, 'w') as file:
+        file.write('\n'.join(pseudo_labels))
+        file.write('\n')
 
 def train(args, labeled_trainloader, unlabeled_trainloader, test_loader,
           model, optimizer, ema_model, scheduler):
